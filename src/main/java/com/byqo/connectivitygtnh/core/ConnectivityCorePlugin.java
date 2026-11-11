@@ -6,16 +6,12 @@ import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
 
 @IFMLLoadingPlugin.Name("ConnectivityGTNH")
 @IFMLLoadingPlugin.MCVersion("1.7.10")
-@IFMLLoadingPlugin.TransformerExclusions({
-    "com.byqo.connectivitygtnh.core"
-})
+@IFMLLoadingPlugin.TransformerExclusions({ "com.byqo.connectivitygtnh.core" })
 public final class ConnectivityCorePlugin implements IFMLLoadingPlugin {
 
     @Override
     public String[] getASMTransformerClass() {
-        return new String[] {
-            "com.byqo.connectivitygtnh.core.NetworkTimeoutTransformer"
-        };
+        return new String[] { "com.byqo.connectivitygtnh.core.NetworkTimeoutTransformer" };
     }
 
     @Override
