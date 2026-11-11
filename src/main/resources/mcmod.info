@@ -1,0 +1,19 @@
+[
+  {
+    "modid": "connectivitygtnh",
+    "name": "Connectivity GTNH",
+    "description": "Configurable server-side Netty read timeout for GTNH 1.7.10.",
+    "version": "0.1.0",
+    "mcversion": "1.7.10",
+    "url": "https://github.com/damian2603/Test321",
+    "authorList": ["Project contributors"],
+    "credits": "Inspired by the configurable disconnect timeout in Connectivity by someaddons.",
+    "logoFile": "",
+    "screenshots": [],
+    "parent": "",
+    "requiredMods": [],
+    "dependencies": [],
+    "dependants": [],
+    "useDependencyInformation": false
+  }
+]
