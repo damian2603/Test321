@@ -1,16 +1,25 @@
-name: Build
+name: Build and GTNH server smoke test
 
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      test_with_neb:
+        description: "Also install the latest compatible NeverEnoughBandwidthLegacy release"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
+    name: Build Connectivity GTNH
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,3 +44,207 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
           retention-days: 14
+
+  gtnh-server-smoke-test:
+    name: Boot GTNH 2.9.0 with Connectivity GTNH
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # On push/PR events the combined NEBL test is enabled. A manual run can
+      # turn it off to isolate Connectivity GTNH from other networking mods.
+      NEB_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.test_with_neb }}
+    steps:
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download Connectivity GTNH build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: connectivitygtnh-${{ github.sha }}
+          path: mod-artifact
+
+      - name: Download and extract official GTNH 2.9.0 server pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 5 \
+            "https://downloads.gtnewhorizons.com/ServerPacks/GT_New_Horizons_2.9.0_Server_Java_17-26.zip" \
+            --output gtnh-server.zip
+          mkdir -p gtnh-server
+          unzip -q gtnh-server.zip -d gtnh-server
+          rm gtnh-server.zip
+
+          test -f gtnh-server/java9args.txt
+          test -f gtnh-server/lwjgl3ify-forgePatches.jar
+          test -d gtnh-server/mods
+          echo "GTNH server pack extracted successfully."
+          df -h .
+
+      - name: Install Connectivity GTNH and optional NEBL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONNECTIVITY_JAR="$(find mod-artifact -type f -name 'connectivitygtnh-*.jar' \
+            ! -name '*-dev.jar' ! -name '*-sources.jar' -print -quit)"
+          if [[ -z "${CONNECTIVITY_JAR}" ]]; then
+            echo "::error::Could not find the reobfuscated Connectivity GTNH runtime JAR."
+            find mod-artifact -maxdepth 2 -type f -print
+            exit 1
+          fi
+          cp "${CONNECTIVITY_JAR}" gtnh-server/mods/
+          echo "Installed Connectivity GTNH: $(basename "${CONNECTIVITY_JAR}")"
+
+          # Remove any copy bundled in the server archive so that the test
+          # uses exactly one NEBL version.
+          shopt -s nullglob
+          for candidate in gtnh-server/mods/*.jar; do
+            if unzip -p "${candidate}" mcmod.info 2>/dev/null | \
+              grep -Eiq 'NeverEnoughBandwidth|notenoughbandwidth'; then
+              rm -f "${candidate}"
+              echo "Removed bundled NEBL copy: $(basename "${candidate}")"
+            fi
+          done
+
+          if [[ "${NEB_ENABLED}" == "true" ]]; then
+            RELEASE_JSON="$(curl --fail --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              https://api.github.com/repos/ABKQPO/NeverEnoughBandwidthLegacy/releases/latest)"
+
+            RELEASE_TAG="$(jq -r '.tag_name // empty' <<< "${RELEASE_JSON}")"
+            RAW_VERSION="${RELEASE_TAG#v}"
+            NEB_VERSION="$(sed -E 's/^([0-9]+(\\.[0-9]+){1,3}).*/\\1/' <<< "${RAW_VERSION}")"
+            if [[ -z "${RELEASE_TAG}" || -z "${NEB_VERSION}" ]] || \
+              [[ "$(printf '1.0.3\n%s\n' "${NEB_VERSION}" | sort -V | head -n1)" != "1.0.3" ]]; then
+              echo "::error::Latest NEBL release (${RELEASE_TAG:-unknown}) is not a supported 1.0.3+ build for GTNH 2.9.0."
+              exit 1
+            fi
+
+            NEB_ASSET_NAME="$(jq -r '[.assets[]
+              | select(.name | ascii_downcase | endswith(".jar"))
+              | select((.name | ascii_downcase | test("(-dev|-sources|-javadoc)\\.jar$")) | not)]
+              | .[0].name // empty' <<< "${RELEASE_JSON}")"
+            NEB_ASSET_URL="$(jq -r --arg name "${NEB_ASSET_NAME}" \
+              '.assets[] | select(.name == $name) | .browser_download_url' <<< "${RELEASE_JSON}")"
+
+            if [[ -z "${NEB_ASSET_NAME}" || -z "${NEB_ASSET_URL}" ]]; then
+              echo "::error::Could not find a runtime JAR in NEBL release ${RELEASE_TAG}."
+              jq -r '.assets[].name' <<< "${RELEASE_JSON}"
+              exit 1
+            fi
+
+            curl --fail --location --retry 3 --retry-delay 5 \
+              "${NEB_ASSET_URL}" --output "gtnh-server/mods/${NEB_ASSET_NAME}"
+            if ! jar tf "gtnh-server/mods/${NEB_ASSET_NAME}" | grep -q 'NebCoreMod.class'; then
+              echo "::error::Downloaded NEBL JAR does not contain the expected coremod entry point."
+              exit 1
+            fi
+            echo "Installed NeverEnoughBandwidthLegacy ${RELEASE_TAG}: ${NEB_ASSET_NAME}"
+          else
+            echo "NEBL test disabled for this manual run."
+          fi
+
+      - name: Accept EULA and configure headless test server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd gtnh-server
+          printf 'eula=true\n' > eula.txt
+
+          if [[ -f server.properties ]]; then
+            sed -i 's/^online-mode=.*/online-mode=false/' server.properties
+            sed -i 's/^max-players=.*/max-players=1/' server.properties
+          fi
+
+      - name: Start server and verify mod loading
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd gtnh-server
+
+          # Use the GTNH 2.9 Java 17+ server entry point directly instead of
+          # the interactive auto-restart wrapper. The 5 GiB heap fits the
+          # memory budget of a standard GitHub-hosted runner.
+          mkfifo server-console.in
+          exec 3<>server-console.in
+          java -Xms1G -Xmx5G \
+            -Djava.awt.headless=true \
+            -Dterminal.jline=false -Dterminal.ansi=true \
+            -Dfml.readTimeout=180 \
+            @java9args.txt -jar lwjgl3ify-forgePatches.jar nogui \
+            <server-console.in >server-console.log 2>&1 &
+          SERVER_PID=$!
+
+          cleanup() {
+            if kill -0 "${SERVER_PID}" 2>/dev/null; then
+              printf 'stop\n' >&3 || true
+              for _ in {1..15}; do
+                kill -0 "${SERVER_PID}" 2>/dev/null || break
+                sleep 2
+              done
+              kill -TERM "${SERVER_PID}" 2>/dev/null || true
+              wait "${SERVER_PID}" 2>/dev/null || true
+            fi
+            exec 3>&- || true
+          }
+          trap cleanup EXIT
+
+          echo "Waiting up to 25 minutes for GTNH startup..."
+          STARTED=false
+          for _ in {1..150}; do
+            if grep -Eq 'Done \([^)]*\)!' logs/latest.log server-console.log 2>/dev/null; then
+              STARTED=true
+              break
+            fi
+            if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+              echo "::error::GTNH server process exited before reaching Done."
+              tail -n 200 server-console.log || true
+              tail -n 200 logs/latest.log || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          if [[ "${STARTED}" != "true" ]]; then
+            echo "::error::GTNH did not reach Done within 25 minutes."
+            tail -n 250 server-console.log || true
+            tail -n 250 logs/latest.log || true
+            exit 1
+          fi
+
+          LOG_FILE="logs/latest.log"
+          test -f "${LOG_FILE}"
+
+          if ! grep -Fq '[ConnectivityGTNH] Server read timeout configured to 180 seconds' "${LOG_FILE}"; then
+            echo "::error::Connectivity GTNH config was not initialized."
+            tail -n 250 "${LOG_FILE}"
+            exit 1
+          fi
+
+          if ! grep -Fq '[ConnectivityGTNH] Patched ' "${LOG_FILE}"; then
+            echo "::error::Connectivity GTNH did not patch the server ReadTimeoutHandler."
+            tail -n 250 "${LOG_FILE}"
+            exit 1
+          fi
+
+          echo "GTNH reached Done and Connectivity GTNH patched the server timeout."
+          if [[ "${NEB_ENABLED}" == "true" ]]; then
+            echo "NEBL runtime JAR was installed and the combined server boot completed."
+          fi
+          grep -E 'Done \([^)]*\)!|ConnectivityGTNH' "${LOG_FILE}" | tail -n 20
+
+      - name: Upload server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtnh-2.9.0-smoke-logs-${{ github.sha }}
+          path: |
+            gtnh-server/logs/latest.log
+            gtnh-server/server-console.log
+            gtnh-server/crash-reports/**
+          if-no-files-found: ignore
+          retention-days: 7
