@@ -53,7 +53,9 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             int constructorMatches = 0;
             int patchedInstructions = 0;
 
-            for (MethodNode method : classNode.methods) {
+            // ASM 5 (bundled with Forge 1.7.10) exposes ClassNode.methods as a raw List.
+            for (Object methodObject : classNode.methods) {
+                MethodNode method = (MethodNode) methodObject;
                 AbstractInsnNode[] instructions = method.instructions.toArray();
 
                 for (AbstractInsnNode instruction : instructions) {
