@@ -8,8 +8,7 @@ import cpw.mods.fml.common.event.FMLPreInitializationEvent;
     name = ConnectivityGTNH.MOD_NAME,
     version = Tags.VERSION,
     acceptedMinecraftVersions = "[1.7.10]",
-    acceptableRemoteVersions = "*"
-)
+    acceptableRemoteVersions = "*")
 public final class ConnectivityGTNH {
 
     public static final String MOD_ID = "connectivitygtnh";
