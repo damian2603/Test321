@@ -1,5 +1,9 @@
 name: Build and GTNH server smoke test
 
+concurrency:
+  group: connectivity-gtnh-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, master]
