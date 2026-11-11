@@ -13,12 +13,16 @@ import org.objectweb.asm.tree.MethodNode;
 import net.minecraft.launchwrapper.IClassTransformer;
 
 /**
- * Replaces the literal 30 passed to ReadTimeoutHandler in the dedicated
- * server's TCP channel initializer. This leaves the client-side timeout alone.
+ * Replaces the literal 30 passed to ReadTimeoutHandler in NetworkSystem's
+ * remote TCP ChannelInitializer. The local in-memory initializer and client
+ * connection timeout are left unchanged.
  */
 public final class NetworkTimeoutTransformer implements IClassTransformer {
 
-    private static final String TARGET_CLASS = "net.minecraft.network.NetworkSystem$1";
+    private static final String TARGET_CLASS_PREFIX =
+        "net.minecraft.network.NetworkSystem$";
+    private static final String CHANNEL_INITIALIZER =
+        "io/netty/channel/ChannelInitializer";
     private static final String READ_TIMEOUT_HANDLER =
         "io/netty/handler/timeout/ReadTimeoutHandler";
     private static final String CONFIG_CLASS =
@@ -31,7 +35,7 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
         }
 
         String targetName = transformedName == null ? name : transformedName;
-        if (!TARGET_CLASS.equals(targetName)) {
+        if (targetName == null || !targetName.startsWith(TARGET_CLASS_PREFIX)) {
             return basicClass;
         }
 
@@ -39,6 +43,12 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             ClassReader reader = new ClassReader(basicClass);
             ClassNode classNode = new ClassNode();
             reader.accept(classNode, 0);
+
+            // NetworkSystem has more than one anonymous inner class. Match the
+            // actual Netty initializer structurally rather than assuming $1.
+            if (!CHANNEL_INITIALIZER.equals(classNode.superName)) {
+                return basicClass;
+            }
 
             int constructorMatches = 0;
             int patchedInstructions = 0;
@@ -78,10 +88,17 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
                 }
             }
 
+            // The other NetworkSystem ChannelInitializer is local-only and
+            // does not install a ReadTimeoutHandler, so it is expected to have
+            // no matching constructor.
+            if (constructorMatches == 0) {
+                return basicClass;
+            }
+
             if (constructorMatches != 1 || patchedInstructions != 1) {
                 System.err.println(
                     "[ConnectivityGTNH] WARNING: expected one ReadTimeoutHandler(int) "
-                    + "constructor with a 30-second literal in " + TARGET_CLASS
+                    + "constructor with a 30-second literal in " + targetName
                     + ", found constructors=" + constructorMatches
                     + ", patched=" + patchedInstructions
                     + ". Leaving original bytecode unchanged."
@@ -93,13 +110,13 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             classNode.accept(writer);
 
             System.out.println(
-                "[ConnectivityGTNH] Patched NetworkSystem$1 ReadTimeoutHandler: "
-                + "30s -> configurable timeout"
+                "[ConnectivityGTNH] Patched " + targetName
+                + " ReadTimeoutHandler: 30s -> configurable timeout"
             );
             return writer.toByteArray();
         } catch (Throwable error) {
             System.err.println(
-                "[ConnectivityGTNH] ERROR while patching " + TARGET_CLASS
+                "[ConnectivityGTNH] ERROR while patching " + targetName
                 + "; original bytecode will be used."
             );
             error.printStackTrace();
