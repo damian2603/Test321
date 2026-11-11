@@ -37,11 +37,14 @@ The setting affects the server's accepted TCP connections. It does not change th
 
 ## Verification
 
-At server startup, look for a log line similar to:
+At server startup, look for log lines similar to:
 
 ```
-[ConnectivityGTNH] Patched NetworkSystem$1 ReadTimeoutHandler: 30s -> configurable timeout
+[ConnectivityGTNH] Server read timeout configured to 180 seconds
+[ConnectivityGTNH] Patched net.minecraft.network.NetworkSystem$N ReadTimeoutHandler: 30s -> configurable timeout
 ```
+
+The transformer identifies the remote TCP channel initializer by its superclass and constructor call, rather than assuming an anonymous inner-class number. The local in-memory initializer is left alone.
 
 If the transformer cannot find the expected constructor pattern, it logs a warning and leaves the original bytecode untouched rather than risking a broken server startup.
 
@@ -57,4 +60,4 @@ The CI workflow builds the mod and uploads the JAR as an artifact.
 
 ## Implementation notes
 
-This is a focused reimplementation of Connectivity's configurable play disconnect timeout, not a full port of all Connectivity features. It uses a Forge 1.7.10 coremod transformer and ASM to modify only the server's `NetworkSystem$1` channel initializer. It deliberately does not alter packet-size limits, compression, login policy, or packet handling.
+This is a focused reimplementation of Connectivity's configurable play disconnect timeout, not a full port of all Connectivity features. It uses a Forge 1.7.10 coremod transformer and ASM to modify only the remote TCP channel initializer inside `NetworkSystem`. It deliberately does not alter packet-size limits, compression, login policy, or packet handling.
