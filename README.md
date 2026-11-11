@@ -58,6 +58,14 @@ Requires JDK 25 and the included Gradle wrapper.
 
 The CI workflow builds the mod and uploads the JAR as an artifact.
 
+## GTNH 2.9.0 server smoke test
+
+After the build, GitHub Actions downloads the official **GTNH 2.9.0 Java 17–26 server pack**, installs the reobfuscated Connectivity GTNH JAR, and boots the server on Java 21. The test succeeds only if the server reaches `Done` and the log confirms that Connectivity GTNH replaced the server-side Netty `ReadTimeoutHandler`.
+
+The test also installs the latest `NeverEnoughBandwidthLegacy` release when it is version **1.0.3 or newer**, which is the version range documented as compatible with GTNH 2.9.0. On a manual `workflow_dispatch` run, the `test_with_neb` input can be disabled to isolate Connectivity GTNH.
+
+This is a server startup / mod-loading smoke test. It does not connect a Minecraft client or simulate a real network interruption, so it does not prove the reconnect/timeout behaviour end to end. Logs and crash reports are uploaded as a workflow artifact for troubleshooting.
+
 ## Implementation notes
 
 This is a focused reimplementation of Connectivity's configurable play disconnect timeout, not a full port of all Connectivity features. It uses a Forge 1.7.10 coremod transformer and ASM to modify only the remote TCP channel initializer inside `NetworkSystem`. It deliberately does not alter packet-size limits, compression, login policy, or packet handling.
