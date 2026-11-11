@@ -3,6 +3,7 @@ package com.byqo.connectivitygtnh;
 import java.io.File;
 
 import net.minecraftforge.common.config.Configuration;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -15,8 +16,7 @@ public final class TimeoutConfig {
     private static final int DEFAULT_TIMEOUT_SECONDS = 180;
     private static volatile int disconnectTimeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
 
-    private TimeoutConfig() {
-    }
+    private TimeoutConfig() {}
 
     public static void load(File file) {
         Configuration configuration = new Configuration(file);
@@ -28,8 +28,7 @@ public final class TimeoutConfig {
             DEFAULT_TIMEOUT_SECONDS,
             1,
             3600,
-            "Server-side Netty read timeout, in seconds. Default: 180."
-        );
+            "Server-side Netty read timeout, in seconds. Default: 180.");
 
         if (configuration.hasChanged()) {
             configuration.save();
@@ -37,8 +36,7 @@ public final class TimeoutConfig {
 
         LOG.info(
             "[ConnectivityGTNH] Server read timeout configured to {} seconds",
-            Integer.valueOf(disconnectTimeoutSeconds)
-        );
+            Integer.valueOf(disconnectTimeoutSeconds));
     }
 
     /**
