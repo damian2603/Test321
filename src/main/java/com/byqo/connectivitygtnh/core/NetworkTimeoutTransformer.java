@@ -98,8 +98,7 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
 
             if (constructorMatches != 1 || patchedInstructions != 1) {
                 System.err.println(
-                    "[ConnectivityGTNH] WARNING: expected one ReadTimeoutHandler(int) "
-                        + "constructor in "
+                    "[ConnectivityGTNH] WARNING: expected one ReadTimeoutHandler(int) " + "constructor in "
                         + targetName
                         + ", found constructors="
                         + constructorMatches
@@ -113,8 +112,7 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             classNode.accept(writer);
 
             System.out.println(
-                "[ConnectivityGTNH] Patched " + targetName
-                    + " ReadTimeoutHandler argument -> configurable timeout");
+                "[ConnectivityGTNH] Patched " + targetName + " ReadTimeoutHandler argument -> configurable timeout");
             return writer.toByteArray();
         } catch (Throwable error) {
             System.err
