@@ -224,17 +224,23 @@ jobs:
           fi
 
           LOG_FILE="logs/latest.log"
+          CONSOLE_LOG="server-console.log"
           test -f "${LOG_FILE}"
+          test -f "${CONSOLE_LOG}"
+          LOG_FILES=("${LOG_FILE}" "${CONSOLE_LOG}")
 
-          if ! grep -Fq '[ConnectivityGTNH] Server read timeout configured to 180 seconds' "${LOG_FILE}"; then
+          # Coremod stdout/stderr and some FML logger output go to the launcher
+          # console file, while ordinary server messages also appear in latest.log.
+          # Search both files to avoid false negatives.
+          if ! grep -Fq '[ConnectivityGTNH] Server read timeout configured to 180 seconds' "${LOG_FILES[@]}"; then
             echo "::error::Connectivity GTNH config was not initialized."
-            tail -n 250 "${LOG_FILE}"
+            tail -n 250 "${LOG_FILES[@]}"
             exit 1
           fi
 
-          if ! grep -Fq '[ConnectivityGTNH] Patched ' "${LOG_FILE}"; then
+          if ! grep -Fq '[ConnectivityGTNH] Patched ' "${LOG_FILES[@]}"; then
             echo "::error::Connectivity GTNH did not patch the server ReadTimeoutHandler."
-            tail -n 250 "${LOG_FILE}"
+            tail -n 250 "${LOG_FILES[@]}"
             exit 1
           fi
 
@@ -242,7 +248,7 @@ jobs:
           if [[ "${NEB_ENABLED}" == "true" ]]; then
             echo "NEBL runtime JAR was installed and the combined server boot completed."
           fi
-          grep -E 'Done \([^)]*\)!|ConnectivityGTNH' "${LOG_FILE}" | tail -n 20
+          grep -E 'Done \\([^)]*\\)!|ConnectivityGTNH' "${LOG_FILES[@]}" | tail -n 20
 
       - name: Upload server logs
         if: always()
