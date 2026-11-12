@@ -7,15 +7,15 @@ import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.IntInsnNode;
-import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 /**
- * Replaces the literal 30 passed to ReadTimeoutHandler in NetworkSystem's
- * remote TCP ChannelInitializer. The local in-memory initializer and client
- * connection timeout are left unchanged.
+ * Replaces the integer argument passed to ReadTimeoutHandler in
+ * NetworkSystem's remote TCP ChannelInitializer. The local in-memory
+ * initializer and client connection timeout are left unchanged.
  */
 public final class NetworkTimeoutTransformer implements IClassTransformer {
 
@@ -68,19 +68,24 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
                     }
 
                     constructorMatches++;
-                    AbstractInsnNode timeoutArgument = previousRealInstruction(instruction);
 
-                    if (isIntegerConstant(timeoutArgument, 30)) {
-                        method.instructions.set(
-                            timeoutArgument,
-                            new MethodInsnNode(
-                                Opcodes.INVOKESTATIC,
-                                CONFIG_CLASS,
-                                "getDisconnectTimeoutSeconds",
-                                "()I",
-                                false));
-                        patchedInstructions++;
-                    }
+                    // The timeout value is not necessarily a literal in GTNH:
+                    // earlier transformers may have moved it into a local or
+                    // computed it. At this point the constructor's int argument
+                    // is the top stack value. Discard that value and push our
+                    // configured timeout, leaving the uninitialized handler
+                    // reference beneath it untouched.
+                    InsnList replacement = new InsnList();
+                    replacement.add(new InsnNode(Opcodes.POP));
+                    replacement.add(
+                        new MethodInsnNode(
+                            Opcodes.INVOKESTATIC,
+                            CONFIG_CLASS,
+                            "getDisconnectTimeoutSeconds",
+                            "()I",
+                            false));
+                    method.instructions.insertBefore(instruction, replacement);
+                    patchedInstructions++;
                 }
             }
 
@@ -94,7 +99,7 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             if (constructorMatches != 1 || patchedInstructions != 1) {
                 System.err.println(
                     "[ConnectivityGTNH] WARNING: expected one ReadTimeoutHandler(int) "
-                        + "constructor with a 30-second literal in "
+                        + "constructor in "
                         + targetName
                         + ", found constructors="
                         + constructorMatches
@@ -108,7 +113,8 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             classNode.accept(writer);
 
             System.out.println(
-                "[ConnectivityGTNH] Patched " + targetName + " ReadTimeoutHandler: 30s -> configurable timeout");
+                "[ConnectivityGTNH] Patched " + targetName
+                    + " ReadTimeoutHandler argument -> configurable timeout");
             return writer.toByteArray();
         } catch (Throwable error) {
             System.err
@@ -116,26 +122,5 @@ public final class NetworkTimeoutTransformer implements IClassTransformer {
             error.printStackTrace();
             return basicClass;
         }
-    }
-
-    private static AbstractInsnNode previousRealInstruction(AbstractInsnNode instruction) {
-        AbstractInsnNode previous = instruction.getPrevious();
-        while (previous != null && previous.getOpcode() < 0) {
-            previous = previous.getPrevious();
-        }
-        return previous;
-    }
-
-    private static boolean isIntegerConstant(AbstractInsnNode instruction, int expected) {
-        if (instruction instanceof IntInsnNode) {
-            return ((IntInsnNode) instruction).operand == expected;
-        }
-
-        if (instruction instanceof LdcInsnNode) {
-            Object constant = ((LdcInsnNode) instruction).cst;
-            return constant instanceof Integer && ((Integer) constant).intValue() == expected;
-        }
-
-        return false;
     }
 }
